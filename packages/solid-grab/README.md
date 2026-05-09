@@ -65,14 +65,25 @@ Selecting a child DOM node resolves to the nearest annotated ancestor. Plain DOM
 third-party DOM, SVG without annotations, and nodes outside transformed TSX fall
 back to selector, HTML preview, and text context.
 
+Interaction coverage:
+
+- toolbar/API toggle activation
+- Alt hold activation
+- hover highlight and source label
+- click-to-copy
+- keyboard copy with `C`
+- Escape exit
+- drag multi-select with joined snippets
+- Shadow DOM overlay self-filtering
+
 Known limitations:
 
 - Stack frames are metadata-derived, not Solid runtime owner stacks.
 - Dynamic component tags only resolve when the rendered intrinsic receives
   transformed props.
 - Source line points to the JSX element, not necessarily the component function.
-- The first overlay is intentionally minimal: hover highlight, toolbar toggle,
-  click-to-copy, keyboard copy, Escape exit, and disposal.
+- The overlay is intentionally minimal compared with React Grab: no canvas
+  easing, no context menu, and no comment/prompt mode yet.
 - Plugin support currently covers registration, copy/html/styles/open hooks,
   contributed actions, and toolbar action buttons. A full context menu and
   prompt/comment mode are still future work.

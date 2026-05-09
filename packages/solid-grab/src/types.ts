@@ -35,13 +35,18 @@ export interface GenerateSnippetOptions {
 
 export interface SolidGrabState {
   isActive: boolean;
+  isDragging: boolean;
   targetElement: Element | null;
+  selectedElements: Element[];
+  dragBounds: { x: number; y: number; width: number; height: number } | null;
   isCopying: boolean;
   lastCopySucceeded: boolean | null;
 }
 
 export interface SolidGrabOptions {
   enabled?: boolean;
+  holdKey?: string;
+  keyHoldDuration?: number;
   includeStyles?: boolean;
   maxHtmlLength?: number;
   getContent?: (elements: Element[]) => string | Promise<string>;

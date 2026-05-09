@@ -36,12 +36,21 @@ const writeClipboard = async (content: string): Promise<boolean> => {
 };
 
 export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabAPI => {
-  let options: SolidGrabOptions = { enabled: true, maxHtmlLength: 700, ...initialOptions };
+  let options: SolidGrabOptions = {
+    enabled: true,
+    holdKey: "Alt",
+    keyHoldDuration: 350,
+    maxHtmlLength: 700,
+    ...initialOptions,
+  };
   const plugins = new Map<string, RegisteredPlugin>();
   const controller = new AbortController();
   const state: SolidGrabState = {
     isActive: false,
+    isDragging: false,
     targetElement: null,
+    selectedElements: [],
+    dragBounds: null,
     isCopying: false,
     lastCopySucceeded: null,
   };
@@ -53,7 +62,8 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
   const style = document.createElement("style");
   style.textContent = `
     :host { all: initial; }
-    .box { position: fixed; border: 1px solid rgb(41 128 185 / .85); background: rgb(41 128 185 / .10); border-radius: 4px; pointer-events: none; transition: all 70ms ease-out; }
+    .box, .drag { position: fixed; border: 1px solid rgb(41 128 185 / .85); background: rgb(41 128 185 / .10); border-radius: 4px; pointer-events: none; transition: all 70ms ease-out; }
+    .drag { border-style: dashed; background: rgb(37 99 235 / .08); }
     .label { position: fixed; max-width: min(460px, calc(100vw - 16px)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 6px; border-radius: 4px; color: white; background: #1f2937; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none; box-shadow: 0 2px 8px rgb(0 0 0 / .18); }
     .toolbar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 6px; align-items: center; padding: 6px; border: 1px solid rgb(0 0 0 / .12); border-radius: 8px; background: white; color: #111827; box-shadow: 0 8px 30px rgb(0 0 0 / .18); pointer-events: auto; font: 12px ui-sans-serif, system-ui, sans-serif; }
     button { border: 0; border-radius: 6px; padding: 6px 9px; background: #f3f4f6; color: inherit; font: inherit; cursor: pointer; }
@@ -66,6 +76,9 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
   const box = document.createElement("div");
   box.className = "box";
   box.hidden = true;
+  const dragBox = document.createElement("div");
+  dragBox.className = "drag";
+  dragBox.hidden = true;
   const label = document.createElement("div");
   label.className = "label";
   label.hidden = true;
@@ -84,9 +97,13 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
   const toast = document.createElement("div");
   toast.className = "toast";
   toast.hidden = true;
-  root.append(box, label, toolbar, toast);
+  root.append(box, dragBox, label, toolbar, toast);
 
   let toastTimer: ReturnType<typeof window.setTimeout> | undefined;
+  let holdTimer: ReturnType<typeof window.setTimeout> | undefined;
+  let holdActivated = false;
+  let dragStart: { x: number; y: number } | null = null;
+  let justDragged = false;
 
   const pluginHooks = (): SolidGrabPluginHooks[] =>
     Array.from(plugins.values()).map((entry) => entry.hooks);
@@ -153,6 +170,7 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
   const renderTarget = async (element: Element | null): Promise<void> => {
     if (!element || !state.isActive) {
       box.hidden = true;
+      dragBox.hidden = true;
       label.hidden = true;
       copyButton.hidden = true;
       actionsRoot.replaceChildren();
@@ -184,6 +202,10 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
     toggleButton.textContent = active ? "Grabbing" : "Grab";
     if (!active) {
       state.targetElement = null;
+      state.selectedElements = [];
+      state.isDragging = false;
+      state.dragBounds = null;
+      dragStart = null;
       void renderTarget(null);
       callHook("onDeactivate");
       return;
@@ -197,6 +219,57 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
     return element;
   };
 
+  const updateDragBox = (bounds: SolidGrabState["dragBounds"]): void => {
+    state.dragBounds = bounds;
+    if (!bounds) {
+      dragBox.hidden = true;
+      return;
+    }
+    dragBox.style.left = `${bounds.x}px`;
+    dragBox.style.top = `${bounds.y}px`;
+    dragBox.style.width = `${bounds.width}px`;
+    dragBox.style.height = `${bounds.height}px`;
+    dragBox.hidden = false;
+  };
+
+  const boundsFromPoints = (
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+  ): NonNullable<SolidGrabState["dragBounds"]> => {
+    const x = Math.min(start.x, end.x);
+    const y = Math.min(start.y, end.y);
+    return {
+      x,
+      y,
+      width: Math.abs(start.x - end.x),
+      height: Math.abs(start.y - end.y),
+    };
+  };
+
+  const rectsIntersect = (a: DOMRect, b: NonNullable<SolidGrabState["dragBounds"]>): boolean =>
+    a.width > 0 &&
+    a.height > 0 &&
+    a.right >= b.x &&
+    a.left <= b.x + b.width &&
+    a.bottom >= b.y &&
+    a.top <= b.y + b.height;
+
+  const getElementsInBounds = (bounds: NonNullable<SolidGrabState["dragBounds"]>): Element[] => {
+    const elements = Array.from(document.body.querySelectorAll("*"));
+    const candidates: Element[] = [];
+    for (const element of elements) {
+      if (isSolidGrabOverlayElement(element)) continue;
+      if (element === document.body || element === document.documentElement) continue;
+      if (rectsIntersect(element.getBoundingClientRect(), bounds)) candidates.push(element);
+    }
+    return candidates
+      .filter(
+        (element) =>
+          !candidates.some((candidate) => element !== candidate && element.contains(candidate)),
+      )
+      .slice(0, 25);
+  };
+
   const copyText = async (content: string, elements: Element[]): Promise<boolean> => {
     const success = await writeClipboard(content);
     state.lastCopySucceeded = success;
@@ -208,26 +281,31 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
     return success;
   };
 
-  const copyElement = async (element: Element): Promise<boolean> => {
-    if (isSolidGrabOverlayElement(element)) return false;
+  const copyElements = async (elements: Element[]): Promise<boolean> => {
+    const filteredElements = elements.filter((element) => !isSolidGrabOverlayElement(element));
+    if (filteredElements.length === 0) return false;
     state.isCopying = true;
     try {
-      const elements = [element];
       for (const hooks of pluginHooks()) {
-        await hooks.onBeforeCopy?.(elements);
+        await hooks.onBeforeCopy?.(filteredElements);
       }
-      const custom = options.getContent ? await options.getContent(elements) : null;
+      const custom = options.getContent ? await options.getContent(filteredElements) : null;
       const rawSnippets = custom
         ? [custom]
-        : await generateSnippet(elements, {
+        : await generateSnippet(filteredElements, {
             includeStyles: options.includeStyles,
             maxHtmlLength: options.maxHtmlLength,
           });
       const transformedSnippets = await Promise.all(
-        rawSnippets.map((snippet) => reduceSnippet(snippet, element)),
+        rawSnippets.map((snippet, index) =>
+          reduceSnippet(snippet, filteredElements[index] ?? filteredElements[0]),
+        ),
       );
-      const content = await reduceCopyContent(transformedSnippets.join("\n\n---\n\n"), elements);
-      return await copyText(content, elements);
+      const content = await reduceCopyContent(
+        transformedSnippets.join("\n\n---\n\n"),
+        filteredElements,
+      );
+      return await copyText(content, filteredElements);
     } catch (error) {
       state.lastCopySucceeded = false;
       const normalized = error instanceof Error ? error : new Error(String(error));
@@ -237,6 +315,8 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
       state.isCopying = false;
     }
   };
+
+  const copyElement = async (element: Element): Promise<boolean> => copyElements([element]);
 
   const getActions = (): SolidGrabAction[] => [
     {
@@ -343,6 +423,14 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
 
   const onMove = (event: MouseEvent): void => {
     if (!state.isActive) return;
+    if (dragStart) {
+      const bounds = boundsFromPoints(dragStart, { x: event.clientX, y: event.clientY });
+      if (bounds.width > 4 || bounds.height > 4) {
+        state.isDragging = true;
+        updateDragBox(bounds);
+      }
+      return;
+    }
     const element = pickElement(event);
     if (!element || element === state.targetElement) return;
     state.targetElement = element;
@@ -350,8 +438,44 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
     void renderTarget(element);
   };
 
+  const onPointerDown = (event: MouseEvent): void => {
+    if (!state.isActive || event.button !== 0) return;
+    const element = pickElement(event);
+    if (!element) return;
+    dragStart = { x: event.clientX, y: event.clientY };
+    state.isDragging = false;
+  };
+
+  const onPointerUp = (event: MouseEvent): void => {
+    if (!dragStart) return;
+    const bounds = boundsFromPoints(dragStart, { x: event.clientX, y: event.clientY });
+    dragStart = null;
+    if (!state.isDragging || bounds.width <= 4 || bounds.height <= 4) {
+      state.isDragging = false;
+      updateDragBox(null);
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    justDragged = true;
+    window.setTimeout(() => {
+      justDragged = false;
+    }, 0);
+    state.isDragging = false;
+    updateDragBox(null);
+    const selected = getElementsInBounds(bounds);
+    state.selectedElements = selected;
+    if (selected.length > 0) void copyElements(selected);
+  };
+
   const onClick = (event: MouseEvent): void => {
     if (!state.isActive) return;
+    if (justDragged) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const element = pickElement(event);
     if (!element) return;
     event.preventDefault();
@@ -361,6 +485,13 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
   };
 
   const onKey = (event: KeyboardEvent): void => {
+    if (event.key === options.holdKey && !state.isActive && !holdTimer) {
+      holdTimer = window.setTimeout(() => {
+        holdActivated = true;
+        holdTimer = undefined;
+        setActive(true);
+      }, options.keyHoldDuration ?? 350);
+    }
     if (event.key === "Escape" && state.isActive) {
       event.preventDefault();
       setActive(false);
@@ -371,10 +502,23 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
     }
   };
 
+  const onKeyUp = (event: KeyboardEvent): void => {
+    if (event.key !== options.holdKey) return;
+    if (holdTimer) {
+      window.clearTimeout(holdTimer);
+      holdTimer = undefined;
+    }
+    if (holdActivated) {
+      holdActivated = false;
+      setActive(false);
+    }
+  };
+
   const api: SolidGrabAPI = {
     init: () => api,
     dispose: () => {
       controller.abort();
+      if (holdTimer) window.clearTimeout(holdTimer);
       for (const entry of plugins.values()) entry.cleanup?.();
       plugins.clear();
       host.remove();
@@ -421,8 +565,14 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
     { signal: controller.signal },
   );
   document.addEventListener("mousemove", onMove, { capture: true, signal: controller.signal });
+  document.addEventListener("mousedown", onPointerDown, {
+    capture: true,
+    signal: controller.signal,
+  });
+  document.addEventListener("mouseup", onPointerUp, { capture: true, signal: controller.signal });
   document.addEventListener("click", onClick, { capture: true, signal: controller.signal });
   document.addEventListener("keydown", onKey, { capture: true, signal: controller.signal });
+  document.addEventListener("keyup", onKeyUp, { capture: true, signal: controller.signal });
   document.body.append(host);
 
   return api;

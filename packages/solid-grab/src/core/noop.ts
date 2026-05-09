@@ -13,7 +13,10 @@ export const createNoopApi = (): SolidGrabAPI => ({
   getStackContext: () => Promise.resolve(""),
   getState: () => ({
     isActive: false,
+    isDragging: false,
     targetElement: null,
+    selectedElements: [],
+    dragBounds: null,
     isCopying: false,
     lastCopySucceeded: null,
   }),
