@@ -54,6 +54,13 @@ export interface SolidGrabPluginHooks {
   onBeforeCopy?: (elements: Element[]) => void | Promise<void>;
   transformSnippet?: (snippet: string, element: Element) => string | Promise<string>;
   transformCopyContent?: (content: string, elements: Element[]) => string | Promise<string>;
+  transformHtmlContent?: (html: string, elements: Element[]) => string | Promise<string>;
+  transformStylesContent?: (styles: string, elements: Element[]) => string | Promise<string>;
+  transformOpenFileUrl?: (url: string, filePath: string, lineNumber: number | null) => string;
+  onOpenFile?: (
+    filePath: string,
+    lineNumber: number | null,
+  ) => boolean | void | Promise<boolean | void>;
   onAfterCopy?: (elements: Element[], success: boolean) => void;
   onCopySuccess?: (elements: Element[], content: string) => void;
   onCopyError?: (error: Error) => void;
@@ -64,12 +71,14 @@ export interface SolidGrabActionContext {
   elements: Element[];
   context: SolidGrabElementContext;
   copy: () => Promise<boolean>;
+  writeText: (content: string) => Promise<boolean>;
+  openSource: () => Promise<boolean>;
 }
 
 export interface SolidGrabAction {
   id: string;
   label: string;
-  onAction: (context: SolidGrabActionContext) => void | Promise<void>;
+  onAction: (context: SolidGrabActionContext) => boolean | void | Promise<boolean | void>;
 }
 
 export interface SolidGrabPlugin {
@@ -97,6 +106,8 @@ export interface SolidGrabAPI {
   registerPlugin: (plugin: SolidGrabPlugin) => void;
   unregisterPlugin: (name: string) => void;
   getPlugins: () => SolidGrabPlugin[];
+  getActions: () => SolidGrabAction[];
+  runAction: (id: string, element: Element) => Promise<boolean>;
 }
 
 declare global {

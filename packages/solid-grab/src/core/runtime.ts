@@ -1,18 +1,29 @@
-import { generateSnippet, getElementContext, getSource, getStackContext } from "../primitives.js";
+import {
+  createOpenFileUrl,
+  generateSnippet,
+  getElementContext,
+  getSource,
+  getStackContext,
+  openFile,
+} from "../primitives.js";
 import type {
+  SolidGrabAction,
+  SolidGrabActionContext,
   SolidGrabAPI,
+  SolidGrabElementContext,
   SolidGrabOptions,
   SolidGrabPlugin,
   SolidGrabPluginHooks,
   SolidGrabState,
 } from "../types.js";
-import { isSolidGrabOverlayElement } from "../utils/dom.js";
+import { getComputedStylePreview, isSolidGrabOverlayElement } from "../utils/dom.js";
 
 const OVERLAY_ATTR = "data-solid-grab-overlay";
 
 interface RegisteredPlugin {
   plugin: SolidGrabPlugin;
   hooks: SolidGrabPluginHooks;
+  actions: SolidGrabAction[];
   cleanup?: () => void;
 }
 
@@ -67,7 +78,9 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
   copyButton.type = "button";
   copyButton.textContent = "Copy";
   copyButton.hidden = true;
-  toolbar.append(toggleButton, copyButton);
+  const actionsRoot = document.createElement("div");
+  actionsRoot.style.cssText = "display:flex;gap:6px;align-items:center;";
+  toolbar.append(toggleButton, copyButton, actionsRoot);
   const toast = document.createElement("div");
   toast.className = "toast";
   toast.hidden = true;
@@ -98,6 +111,26 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
     return next;
   };
 
+  const reduceHtmlContent = async (content: string, elements: Element[]): Promise<string> => {
+    let next = content;
+    for (const hooks of pluginHooks()) {
+      if (hooks.transformHtmlContent) {
+        next = await hooks.transformHtmlContent(next, elements);
+      }
+    }
+    return next;
+  };
+
+  const reduceStylesContent = async (content: string, elements: Element[]): Promise<string> => {
+    let next = content;
+    for (const hooks of pluginHooks()) {
+      if (hooks.transformStylesContent) {
+        next = await hooks.transformStylesContent(next, elements);
+      }
+    }
+    return next;
+  };
+
   const reduceSnippet = async (snippet: string, element: Element): Promise<string> => {
     let next = snippet;
     for (const hooks of pluginHooks()) {
@@ -122,6 +155,7 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
       box.hidden = true;
       label.hidden = true;
       copyButton.hidden = true;
+      actionsRoot.replaceChildren();
       return;
     }
 
@@ -140,6 +174,7 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
     label.style.top = `${Math.max(4, rect.top - 24)}px`;
     label.hidden = false;
     copyButton.hidden = false;
+    renderActionButtons(element);
   };
 
   const setActive = (active: boolean): void => {
@@ -162,6 +197,17 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
     return element;
   };
 
+  const copyText = async (content: string, elements: Element[]): Promise<boolean> => {
+    const success = await writeClipboard(content);
+    state.lastCopySucceeded = success;
+    callHook("onAfterCopy", elements, success);
+    if (success) {
+      callHook("onCopySuccess", elements, content);
+      showToast("Copied Solid context");
+    }
+    return success;
+  };
+
   const copyElement = async (element: Element): Promise<boolean> => {
     if (isSolidGrabOverlayElement(element)) return false;
     state.isCopying = true;
@@ -181,14 +227,7 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
         rawSnippets.map((snippet) => reduceSnippet(snippet, element)),
       );
       const content = await reduceCopyContent(transformedSnippets.join("\n\n---\n\n"), elements);
-      const success = await writeClipboard(content);
-      state.lastCopySucceeded = success;
-      callHook("onAfterCopy", elements, success);
-      if (success) {
-        callHook("onCopySuccess", elements, content);
-        showToast("Copied Solid context");
-      }
-      return success;
+      return await copyText(content, elements);
     } catch (error) {
       state.lastCopySucceeded = false;
       const normalized = error instanceof Error ? error : new Error(String(error));
@@ -196,6 +235,109 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
       return false;
     } finally {
       state.isCopying = false;
+    }
+  };
+
+  const getActions = (): SolidGrabAction[] => [
+    {
+      id: "copy",
+      label: "Copy",
+      onAction: (context) => context.copy(),
+    },
+    {
+      id: "open-in-editor",
+      label: "Open",
+      onAction: (context) => context.openSource(),
+    },
+    {
+      id: "copy-html",
+      label: "HTML",
+      onAction: async (context) => {
+        const content = await reduceHtmlContent(
+          `${context.element.outerHTML}\n\n${context.context.stackString}`.trim(),
+          context.elements,
+        );
+        return context.writeText(content);
+      },
+    },
+    {
+      id: "copy-styles",
+      label: "Styles",
+      onAction: async (context) => {
+        const styles = Object.entries(getComputedStylePreview(context.element))
+          .map(([name, value]) => `${name}: ${value};`)
+          .join("\n");
+        const content = await reduceStylesContent(styles, context.elements);
+        return context.writeText(content);
+      },
+    },
+    ...Array.from(plugins.values()).flatMap((entry) => entry.actions),
+  ];
+
+  const openSource = async (context: SolidGrabElementContext): Promise<boolean> => {
+    const filePath = context.source.filePath;
+    if (!filePath) return false;
+
+    for (const hooks of pluginHooks()) {
+      const handled = await hooks.onOpenFile?.(filePath, context.source.lineNumber);
+      if (handled) return true;
+    }
+
+    let url = createOpenFileUrl(filePath, context.source.lineNumber);
+    for (const hooks of pluginHooks()) {
+      if (hooks.transformOpenFileUrl) {
+        url = hooks.transformOpenFileUrl(url, filePath, context.source.lineNumber);
+      }
+    }
+    return await openFile(filePath, context.source.lineNumber, url);
+  };
+
+  const createActionContext = async (actionElement: Element): Promise<SolidGrabActionContext> => {
+    const elements = [actionElement];
+    const context = await getElementContext(actionElement, options);
+    return {
+      element: actionElement,
+      elements,
+      context,
+      copy: () => copyElement(actionElement),
+      writeText: (content) => copyText(content, elements),
+      openSource: () => openSource(context),
+    };
+  };
+
+  const runAction = async (id: string, element: Element): Promise<boolean> => {
+    const action = getActions().find((candidate) => candidate.id === id);
+    if (!action || isSolidGrabOverlayElement(element)) return false;
+    try {
+      state.isCopying = true;
+      const context = await createActionContext(element);
+      await action.onAction(context);
+      return true;
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      callHook("onCopyError", normalized);
+      return false;
+    } finally {
+      state.isCopying = false;
+    }
+  };
+
+  const renderActionButtons = (element: Element): void => {
+    actionsRoot.replaceChildren();
+    for (const action of getActions().filter((candidate) => candidate.id !== "copy")) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = action.label;
+      button.addEventListener(
+        "click",
+        (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void runAction(action.id, element);
+        },
+        { signal: controller.signal },
+      );
+      actionsRoot.append(button);
     }
   };
 
@@ -254,15 +396,20 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
       plugins.set(plugin.name, {
         plugin,
         hooks: { ...plugin.hooks, ...setup?.hooks },
+        actions: [...(plugin.actions ?? []), ...(setup?.actions ?? [])],
         cleanup: setup?.cleanup,
       });
+      if (state.targetElement) renderActionButtons(state.targetElement);
     },
     unregisterPlugin: (name) => {
       const registered = plugins.get(name);
       registered?.cleanup?.();
       plugins.delete(name);
+      if (state.targetElement) renderActionButtons(state.targetElement);
     },
     getPlugins: () => Array.from(plugins.values()).map((entry) => entry.plugin),
+    getActions,
+    runAction,
   };
 
   toggleButton.addEventListener("click", () => api.toggle(), { signal: controller.signal });

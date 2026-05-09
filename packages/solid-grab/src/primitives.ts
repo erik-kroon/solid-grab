@@ -140,12 +140,20 @@ export const generateSnippet = async (
   return snippets;
 };
 
-export const openFile = async (filePath: string, lineNumber?: number | null): Promise<boolean> => {
-  if (typeof fetch === "undefined" || !filePath) return false;
+export const createOpenFileUrl = (filePath: string, lineNumber?: number | null): string => {
   const line = lineNumber ? `:${lineNumber}` : "";
   const params = new URLSearchParams({ file: `${filePath}${line}` });
+  return `/__open-in-editor?${params.toString()}`;
+};
+
+export const openFile = async (
+  filePath: string,
+  lineNumber?: number | null,
+  url = createOpenFileUrl(filePath, lineNumber),
+): Promise<boolean> => {
+  if (typeof fetch === "undefined" || !filePath) return false;
   try {
-    const response = await fetch(`/__open-in-editor?${params.toString()}`);
+    const response = await fetch(url);
     return response.ok;
   } catch {
     return false;

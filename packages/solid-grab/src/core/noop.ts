@@ -21,4 +21,6 @@ export const createNoopApi = (): SolidGrabAPI => ({
   registerPlugin: noop,
   unregisterPlugin: noop,
   getPlugins: () => [],
+  getActions: () => [],
+  runAction: () => Promise.resolve(false),
 });

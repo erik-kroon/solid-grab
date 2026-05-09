@@ -37,6 +37,7 @@ The runtime exposes `window.__SOLID_GRAB__` with:
 - `copyElement`, `getSource`, `getStackContext`
 - `getState`, `setOptions`
 - `registerPlugin`, `unregisterPlugin`
+- `getActions`, `runAction`
 
 SSR imports are no-op and do not touch browser globals.
 
@@ -72,5 +73,6 @@ Known limitations:
 - Source line points to the JSX element, not necessarily the component function.
 - The first overlay is intentionally minimal: hover highlight, toolbar toggle,
   click-to-copy, keyboard copy, Escape exit, and disposal.
-- Plugin support currently covers registration and copy transforms; full action
-  menu parity is still future work.
+- Plugin support currently covers registration, copy/html/styles/open hooks,
+  contributed actions, and toolbar action buttons. A full context menu and
+  prompt/comment mode are still future work.
