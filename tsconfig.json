@@ -1,0 +1,3 @@
+{
+  "extends": "@riga/config/tsconfig.base.json"
+}
