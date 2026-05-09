@@ -11,7 +11,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "cd apps/web && bun run --bun dev --host 127.0.0.1 --port 3107",
+    command: "cd apps/web && bun run dev --host 127.0.0.1 --port 3107",
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
     url: "http://127.0.0.1:3107",
