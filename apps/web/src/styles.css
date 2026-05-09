@@ -82,3 +82,28 @@ body {
   top: 18px;
   width: 220px;
 }
+
+.manual-plain-dom {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: 260px;
+}
+
+.fixture-runner {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #16a34a;
+  animation: fixture-runner 1.4s linear infinite alternate;
+}
+
+@keyframes fixture-runner {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(160px);
+  }
+}

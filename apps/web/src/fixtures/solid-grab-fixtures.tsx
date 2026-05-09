@@ -1,5 +1,21 @@
 import { Dynamic, Portal } from "solid-js/web";
-import { For, Index, Match, Show, Suspense, Switch, createSignal, lazy } from "solid-js";
+import {
+  For,
+  Index,
+  Match,
+  Show,
+  Suspense,
+  Switch,
+  createSignal,
+  lazy,
+  onCleanup,
+  onMount,
+} from "solid-js";
+import type { JSX } from "solid-js";
+
+import { UnexpectedWidget } from "../odd-location/unexpected-widget";
+import { DuplicateCard as DuplicateCardA } from "./collisions/a";
+import { DuplicateCard as DuplicateCardB } from "./collisions/b";
 
 const LazyPanel = lazy(async () => ({
   default: () => (
@@ -96,6 +112,62 @@ function PlainDomFallback() {
   );
 }
 
+function ChildrenFixture(props: { children: (label: string) => JSX.Element }) {
+  return (
+    <section class="fixture-card" data-testid="children-fixture">
+      <h2>Children callback fixture</h2>
+      {props.children("children callback target")}
+    </section>
+  );
+}
+
+function SvgFixture() {
+  return (
+    <section class="fixture-card" data-testid="svg-fixture">
+      <h2>SVG fixture</h2>
+      <svg width="120" height="48" role="img" aria-label="Solid Grab SVG">
+        <circle cx="24" cy="24" r="18" fill="#2563eb" data-testid="svg-circle" />
+        <text x="54" y="29" data-testid="svg-text">
+          SVG
+        </text>
+      </svg>
+    </section>
+  );
+}
+
+function EdgeFallbackFixture() {
+  onMount(() => {
+    const plain = document.createElement("div");
+    plain.id = "manual-plain-dom-anchor";
+    plain.className = "fixture-card manual-plain-dom";
+    plain.textContent = "Manual plain DOM fallback anchor";
+    document.body.append(plain);
+    onCleanup(() => plain.remove());
+  });
+
+  return (
+    <section class="fixture-card" data-testid="edge-fallback-fixture">
+      <h2>Fallback edges</h2>
+      <div data-testid="hidden-target" hidden>
+        Hidden target
+      </div>
+      <div style={{ width: "0", height: "0", overflow: "hidden" }} data-testid="zero-size-target">
+        Zero size target
+      </div>
+      <p>Manual DOM fallback is appended outside the Solid root.</p>
+    </section>
+  );
+}
+
+function AnimatedFixture() {
+  return (
+    <section class="fixture-card" data-testid="animated-fixture">
+      <h2>Animated fixture</h2>
+      <div class="fixture-runner" data-testid="animated-runner" />
+    </section>
+  );
+}
+
 export function SolidGrabFixtures() {
   return (
     <>
@@ -111,6 +183,19 @@ export function SolidGrabFixtures() {
         <Suspense fallback={<p data-testid="lazy-fallback">Loading lazy fixture</p>}>
           <LazyPanel />
         </Suspense>
+        <ChildrenFixture>
+          {(label) => (
+            <button class="fixture-button" data-testid="children-callback-button">
+              {label}
+            </button>
+          )}
+        </ChildrenFixture>
+        <DuplicateCardA />
+        <DuplicateCardB />
+        <UnexpectedWidget />
+        <SvgFixture />
+        <EdgeFallbackFixture />
+        <AnimatedFixture />
         <PlainDomFallback />
       </main>
       <PortalFixture />
