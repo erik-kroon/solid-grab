@@ -161,13 +161,54 @@ export const openFile = async (
 };
 
 let freezeDepth = 0;
+let freezeStyle: HTMLStyleElement | null = null;
+let pausedAnimations: Animation[] = [];
 
 export const freeze = (): void => {
   freezeDepth += 1;
+  if (freezeDepth > 1 || typeof document === "undefined") return;
+
+  freezeStyle = document.createElement("style");
+  freezeStyle.setAttribute("data-solid-grab-freeze", "");
+  freezeStyle.textContent = `
+    *, *::before, *::after {
+      animation-play-state: paused !important;
+      transition-duration: 0s !important;
+      transition-delay: 0s !important;
+    }
+  `;
+  document.head.append(freezeStyle);
+
+  const animatedRoot = document.body ?? document.documentElement;
+  if (animatedRoot?.getAnimations) {
+    pausedAnimations = animatedRoot
+      .getAnimations({ subtree: true })
+      .filter((animation) => animation.playState === "running");
+    for (const animation of pausedAnimations) {
+      try {
+        animation.pause();
+      } catch {
+        // Ignore browser-specific animation states that cannot be paused.
+      }
+    }
+  }
 };
 
 export const unfreeze = (): void => {
   freezeDepth = Math.max(0, freezeDepth - 1);
+  if (freezeDepth > 0) return;
+
+  freezeStyle?.remove();
+  freezeStyle = null;
+
+  for (const animation of pausedAnimations) {
+    try {
+      animation.play();
+    } catch {
+      // Ignore animations that were removed while the page was frozen.
+    }
+  }
+  pausedAnimations = [];
 };
 
 export const isFreezeActive = (): boolean => freezeDepth > 0;

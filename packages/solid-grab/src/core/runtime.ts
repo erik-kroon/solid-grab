@@ -1,10 +1,12 @@
 import {
   createOpenFileUrl,
+  freeze,
   generateSnippet,
   getElementContext,
   getSource,
   getStackContext,
   openFile,
+  unfreeze,
 } from "../primitives.js";
 import type {
   SolidGrabAction,
@@ -206,10 +208,12 @@ export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabA
       state.isDragging = false;
       state.dragBounds = null;
       dragStart = null;
+      unfreeze();
       void renderTarget(null);
       callHook("onDeactivate");
       return;
     }
+    freeze();
     callHook("onActivate");
   };
 

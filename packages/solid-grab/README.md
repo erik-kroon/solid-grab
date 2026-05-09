@@ -75,6 +75,7 @@ Interaction coverage:
 - Escape exit
 - drag multi-select with joined snippets
 - Shadow DOM overlay self-filtering
+- CSS transition and WAAPI animation freeze while active
 
 Known limitations:
 
@@ -84,6 +85,8 @@ Known limitations:
 - Source line points to the JSX element, not necessarily the component function.
 - The overlay is intentionally minimal compared with React Grab: no canvas
   easing, no context menu, and no comment/prompt mode yet.
+- Solid's reactive graph is not paused. The current freeze layer stabilizes
+  common visual motion but does not buffer signal/store updates.
 - Plugin support currently covers registration, copy/html/styles/open hooks,
   contributed actions, and toolbar action buttons. A full context menu and
   prompt/comment mode are still future work.
