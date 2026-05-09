@@ -1,5 +1,6 @@
 {
-  "include": ["**/*.ts", "**/*.tsx"],
+  "include": ["vite.config.ts", "src/main.tsx", "src/fixtures/**/*.tsx"],
+  "exclude": ["src/routes/**", "src/components/**"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "preserve",

@@ -1,0 +1,282 @@
+import { generateSnippet, getElementContext, getSource, getStackContext } from "../primitives.js";
+import type {
+  SolidGrabAPI,
+  SolidGrabOptions,
+  SolidGrabPlugin,
+  SolidGrabPluginHooks,
+  SolidGrabState,
+} from "../types.js";
+import { isSolidGrabOverlayElement } from "../utils/dom.js";
+
+const OVERLAY_ATTR = "data-solid-grab-overlay";
+
+interface RegisteredPlugin {
+  plugin: SolidGrabPlugin;
+  hooks: SolidGrabPluginHooks;
+  cleanup?: () => void;
+}
+
+const writeClipboard = async (content: string): Promise<boolean> => {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(content);
+    return true;
+  }
+  return false;
+};
+
+export const createRuntime = (initialOptions: SolidGrabOptions = {}): SolidGrabAPI => {
+  let options: SolidGrabOptions = { enabled: true, maxHtmlLength: 700, ...initialOptions };
+  const plugins = new Map<string, RegisteredPlugin>();
+  const controller = new AbortController();
+  const state: SolidGrabState = {
+    isActive: false,
+    targetElement: null,
+    isCopying: false,
+    lastCopySucceeded: null,
+  };
+
+  const host = document.createElement("div");
+  host.setAttribute(OVERLAY_ATTR, "");
+  host.style.cssText = "position:fixed;inset:0;z-index:2147483646;pointer-events:none;";
+  const shadow = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = `
+    :host { all: initial; }
+    .box { position: fixed; border: 1px solid rgb(41 128 185 / .85); background: rgb(41 128 185 / .10); border-radius: 4px; pointer-events: none; transition: all 70ms ease-out; }
+    .label { position: fixed; max-width: min(460px, calc(100vw - 16px)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 6px; border-radius: 4px; color: white; background: #1f2937; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none; box-shadow: 0 2px 8px rgb(0 0 0 / .18); }
+    .toolbar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 6px; align-items: center; padding: 6px; border: 1px solid rgb(0 0 0 / .12); border-radius: 8px; background: white; color: #111827; box-shadow: 0 8px 30px rgb(0 0 0 / .18); pointer-events: auto; font: 12px ui-sans-serif, system-ui, sans-serif; }
+    button { border: 0; border-radius: 6px; padding: 6px 9px; background: #f3f4f6; color: inherit; font: inherit; cursor: pointer; }
+    button[data-active="true"] { background: #2563eb; color: white; }
+    .toast { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); padding: 6px 10px; border-radius: 6px; background: #111827; color: white; font: 12px ui-sans-serif, system-ui, sans-serif; pointer-events: none; }
+  `;
+  const root = document.createElement("div");
+  shadow.append(style, root);
+
+  const box = document.createElement("div");
+  box.className = "box";
+  box.hidden = true;
+  const label = document.createElement("div");
+  label.className = "label";
+  label.hidden = true;
+  const toolbar = document.createElement("div");
+  toolbar.className = "toolbar";
+  const toggleButton = document.createElement("button");
+  toggleButton.type = "button";
+  toggleButton.textContent = "Grab";
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.textContent = "Copy";
+  copyButton.hidden = true;
+  toolbar.append(toggleButton, copyButton);
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.hidden = true;
+  root.append(box, label, toolbar, toast);
+
+  let toastTimer: ReturnType<typeof window.setTimeout> | undefined;
+
+  const pluginHooks = (): SolidGrabPluginHooks[] =>
+    Array.from(plugins.values()).map((entry) => entry.hooks);
+
+  const callHook = <K extends keyof SolidGrabPluginHooks>(
+    name: K,
+    ...args: Parameters<NonNullable<SolidGrabPluginHooks[K]>>
+  ): void => {
+    for (const hooks of pluginHooks()) {
+      const hook = hooks[name] as ((...hookArgs: typeof args) => void) | undefined;
+      hook?.(...args);
+    }
+  };
+
+  const reduceCopyContent = async (content: string, elements: Element[]): Promise<string> => {
+    let next = content;
+    for (const hooks of pluginHooks()) {
+      if (hooks.transformCopyContent) {
+        next = await hooks.transformCopyContent(next, elements);
+      }
+    }
+    return next;
+  };
+
+  const reduceSnippet = async (snippet: string, element: Element): Promise<string> => {
+    let next = snippet;
+    for (const hooks of pluginHooks()) {
+      if (hooks.transformSnippet) {
+        next = await hooks.transformSnippet(next, element);
+      }
+    }
+    return next;
+  };
+
+  const showToast = (message: string): void => {
+    toast.textContent = message;
+    toast.hidden = false;
+    if (toastTimer) window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => {
+      toast.hidden = true;
+    }, 1200);
+  };
+
+  const renderTarget = async (element: Element | null): Promise<void> => {
+    if (!element || !state.isActive) {
+      box.hidden = true;
+      label.hidden = true;
+      copyButton.hidden = true;
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+    box.style.left = `${rect.left}px`;
+    box.style.top = `${rect.top}px`;
+    box.style.width = `${rect.width}px`;
+    box.style.height = `${rect.height}px`;
+    box.hidden = false;
+
+    const context = await getElementContext(element);
+    label.textContent = context.componentName
+      ? `${context.componentName} ${context.source.filePath ?? ""}`.trim()
+      : `${context.tagName} fallback`;
+    label.style.left = `${Math.max(4, rect.left)}px`;
+    label.style.top = `${Math.max(4, rect.top - 24)}px`;
+    label.hidden = false;
+    copyButton.hidden = false;
+  };
+
+  const setActive = (active: boolean): void => {
+    if (state.isActive === active) return;
+    state.isActive = active;
+    toggleButton.dataset.active = String(active);
+    toggleButton.textContent = active ? "Grabbing" : "Grab";
+    if (!active) {
+      state.targetElement = null;
+      void renderTarget(null);
+      callHook("onDeactivate");
+      return;
+    }
+    callHook("onActivate");
+  };
+
+  const pickElement = (event: MouseEvent): Element | null => {
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    if (!element || isSolidGrabOverlayElement(element)) return null;
+    return element;
+  };
+
+  const copyElement = async (element: Element): Promise<boolean> => {
+    if (isSolidGrabOverlayElement(element)) return false;
+    state.isCopying = true;
+    try {
+      const elements = [element];
+      for (const hooks of pluginHooks()) {
+        await hooks.onBeforeCopy?.(elements);
+      }
+      const custom = options.getContent ? await options.getContent(elements) : null;
+      const rawSnippets = custom
+        ? [custom]
+        : await generateSnippet(elements, {
+            includeStyles: options.includeStyles,
+            maxHtmlLength: options.maxHtmlLength,
+          });
+      const transformedSnippets = await Promise.all(
+        rawSnippets.map((snippet) => reduceSnippet(snippet, element)),
+      );
+      const content = await reduceCopyContent(transformedSnippets.join("\n\n---\n\n"), elements);
+      const success = await writeClipboard(content);
+      state.lastCopySucceeded = success;
+      callHook("onAfterCopy", elements, success);
+      if (success) {
+        callHook("onCopySuccess", elements, content);
+        showToast("Copied Solid context");
+      }
+      return success;
+    } catch (error) {
+      state.lastCopySucceeded = false;
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      callHook("onCopyError", normalized);
+      return false;
+    } finally {
+      state.isCopying = false;
+    }
+  };
+
+  const onMove = (event: MouseEvent): void => {
+    if (!state.isActive) return;
+    const element = pickElement(event);
+    if (!element || element === state.targetElement) return;
+    state.targetElement = element;
+    callHook("onElementHover", element);
+    void renderTarget(element);
+  };
+
+  const onClick = (event: MouseEvent): void => {
+    if (!state.isActive) return;
+    const element = pickElement(event);
+    if (!element) return;
+    event.preventDefault();
+    event.stopPropagation();
+    state.targetElement = element;
+    void copyElement(element);
+  };
+
+  const onKey = (event: KeyboardEvent): void => {
+    if (event.key === "Escape" && state.isActive) {
+      event.preventDefault();
+      setActive(false);
+    }
+    if ((event.key === "c" || event.key === "C") && state.isActive && state.targetElement) {
+      event.preventDefault();
+      void copyElement(state.targetElement);
+    }
+  };
+
+  const api: SolidGrabAPI = {
+    init: () => api,
+    dispose: () => {
+      controller.abort();
+      for (const entry of plugins.values()) entry.cleanup?.();
+      plugins.clear();
+      host.remove();
+      if (window.__SOLID_GRAB__ === api) delete window.__SOLID_GRAB__;
+    },
+    activate: () => setActive(true),
+    deactivate: () => setActive(false),
+    toggle: () => setActive(!state.isActive),
+    copyElement,
+    getSource,
+    getStackContext,
+    getState: () => ({ ...state }),
+    setOptions: (nextOptions) => {
+      options = { ...options, ...nextOptions };
+    },
+    registerPlugin: (plugin) => {
+      api.unregisterPlugin(plugin.name);
+      const setup = plugin.setup?.(api);
+      plugins.set(plugin.name, {
+        plugin,
+        hooks: { ...plugin.hooks, ...setup?.hooks },
+        cleanup: setup?.cleanup,
+      });
+    },
+    unregisterPlugin: (name) => {
+      const registered = plugins.get(name);
+      registered?.cleanup?.();
+      plugins.delete(name);
+    },
+    getPlugins: () => Array.from(plugins.values()).map((entry) => entry.plugin),
+  };
+
+  toggleButton.addEventListener("click", () => api.toggle(), { signal: controller.signal });
+  copyButton.addEventListener(
+    "click",
+    () => {
+      if (state.targetElement) void api.copyElement(state.targetElement);
+    },
+    { signal: controller.signal },
+  );
+  document.addEventListener("mousemove", onMove, { capture: true, signal: controller.signal });
+  document.addEventListener("click", onClick, { capture: true, signal: controller.signal });
+  document.addEventListener("keydown", onKey, { capture: true, signal: controller.signal });
+  document.body.append(host);
+
+  return api;
+};

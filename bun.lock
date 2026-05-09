@@ -26,6 +26,7 @@
         "@tanstack/solid-router": "^1.168.20",
         "dotenv": "catalog:",
         "lucide-solid": "^1.8.0",
+        "solid-grab": "workspace:*",
         "solid-js": "^1.9.12",
         "tailwindcss": "^4.2.2",
         "zod": "catalog:",
@@ -52,6 +53,14 @@
       "devDependencies": {
         "@riga/config": "workspace:*",
         "typescript": "catalog:",
+      },
+    },
+    "packages/solid-grab": {
+      "name": "solid-grab",
+      "version": "0.0.0-dev",
+      "devDependencies": {
+        "typescript": "catalog:",
+        "vite": "^8.0.8",
       },
     },
   },
@@ -474,6 +483,8 @@
     "seroval": ["seroval@1.5.4", "", {}, "sha512-46uFvgrXTVxZcUorgSSRZ4y+ieqLLQRMlG4bnCZKW3qI6BZm7Rg4ntMW4p1mILEEBZWrFlcpp0AyIIlM6jD9iw=="],
 
     "seroval-plugins": ["seroval-plugins@1.5.4", "", { "peerDependencies": { "seroval": "^1.0" } }, "sha512-S0xQPhUTefAhNvNWFg0c1J8qJArHt5KdtJ/cFAofo06KD1MVSeFWyl4iiu+ApDIuw0WhjpOfCdgConOfAnLgkw=="],
+
+    "solid-grab": ["solid-grab@workspace:packages/solid-grab"],
 
     "solid-js": ["solid-js@1.9.12", "", { "dependencies": { "csstype": "^3.1.0", "seroval": "~1.5.0", "seroval-plugins": "~1.5.0" } }, "sha512-QzKaSJq2/iDrWR1As6MHZQ8fQkdOBf8GReYb7L5iKwMGceg7HxDcaOHk0at66tNgn9U2U7dXo8ZZpLIAmGMzgw=="],
 

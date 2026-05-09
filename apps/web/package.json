@@ -6,7 +6,8 @@
     "dev": "vite dev",
     "build": "vite build",
     "serve": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check-types": "tsc --noEmit"
   },
   "dependencies": {
     "@riga/env": "workspace:*",
@@ -15,6 +16,7 @@
     "@tanstack/solid-router": "^1.168.20",
     "dotenv": "catalog:",
     "lucide-solid": "^1.8.0",
+    "solid-grab": "workspace:*",
     "solid-js": "^1.9.12",
     "tailwindcss": "^4.2.2",
     "zod": "catalog:"
