@@ -18,7 +18,8 @@
     "build": "turbo build",
     "check-types": "turbo check-types",
     "dev:web": "turbo -F web dev",
-    "check": "oxlint && oxfmt --write"
+    "check": "oxlint && oxfmt --write",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@riga/env": "workspace:*",
@@ -26,6 +27,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@riga/config": "workspace:*",
     "oxfmt": "^0.46.0",
     "oxlint": "^1.61.0",
