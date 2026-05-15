@@ -4,12 +4,6 @@ Dev-only source context grabber for Solid Vite apps.
 
 Solid Grab lets you point at rendered Solid UI, copy the relevant source context, and paste it into a coding agent. It is a Solid-first port of the React Grab workflow: browser overlay, element selection, source hints, snippets, and plugin hooks, with Solid-specific dev metadata instead of React fiber introspection.
 
-## Install
-
-```sh
-bun add -d solid-grab
-```
-
 ## Vite Setup
 
 ```ts
